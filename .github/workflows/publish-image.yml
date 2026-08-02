@@ -1,4 +1,4 @@
-name: Publish container image
+name: 发布容器镜像
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   publish:
-    name: Build and publish GHCR image
+    name: 构建并发布 GHCR 镜像
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +28,6 @@ jobs:
           images: ghcr.io/${{ github.repository_owner }}/zot-token-service
           tags: |
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
             type=sha
       - id: created
         run: echo "value=$(date --utc +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"

@@ -1,4 +1,4 @@
-name: Test
+name: 测试
 
 on:
   push:
@@ -18,4 +18,4 @@ jobs:
       - run: test -z "$(gofmt -l ./src)"
       - run: go test ./...
       - run: go vet ./...
-      - run: go build ./...
+      - run: go build -o /tmp/zot-token-service ./src
