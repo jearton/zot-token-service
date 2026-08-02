@@ -10,23 +10,23 @@ ARG REVISION
 
 WORKDIR /src
 COPY go.mod ./
-COPY main.go main_test.go ./
+COPY src/ ./src/
 
 FROM source AS test
 
-RUN unformatted="$(gofmt -l .)"; \
+RUN unformatted="$(gofmt -l ./src)"; \
     test -z "$unformatted" || { printf 'Unformatted Go files:\n%s\n' "$unformatted"; exit 1; }
 RUN go test ./...
 RUN go vet ./...
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false \
-    -ldflags="-s -w -X main.buildVersion=${VERSION} -X main.buildRevision=${REVISION}" \
-    -o /tmp/zot-token-service .
+  -ldflags="-s -w -X main.buildVersion=${VERSION} -X main.buildRevision=${REVISION}" \
+  -o /tmp/zot-token-service ./src
 
 FROM source AS build
 
 RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false \
-    -ldflags="-s -w -X main.buildVersion=${VERSION} -X main.buildRevision=${REVISION}" \
-    -o /out/zot-token-service .
+  -ldflags="-s -w -X main.buildVersion=${VERSION} -X main.buildRevision=${REVISION}" \
+  -o /out/zot-token-service ./src
 
 FROM scratch
 

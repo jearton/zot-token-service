@@ -13,7 +13,7 @@ export TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 export REGISTRY_SERVICE=registry.example.com
 export REGISTRY_REALM=https://registry.example.com/token
 export ZOT_URL=http://zot:5000
-go run .
+go run ./src
 ```
 
 It listens on `:8080` by default. Available endpoints:
@@ -39,8 +39,12 @@ The image is built `FROM scratch`, runs as an unprivileged user, and exposes onl
 ```sh
 go test ./...
 go vet ./...
-go build ./...
+go build ./src
 ```
+
+The executable source lives in [`src/`](src/). Keeping the Go module file at
+the repository root makes dependency and container builds deterministic while
+separating the application package from repository metadata.
 
 ## Security notes
 
