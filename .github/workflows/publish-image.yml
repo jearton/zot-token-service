@@ -44,3 +44,16 @@ jobs:
             REVISION=${{ github.sha }}
             CREATED=${{ steps.created.outputs.value }}
             SOURCE_URL=https://github.com/${{ github.repository }}
+      - name: 公开 GHCR 镜像包
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --request PATCH \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            --data '{"visibility":"public"}' \
+            https://api.github.com/user/packages/container/zot-token-service
