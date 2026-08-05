@@ -57,6 +57,7 @@ func TestValidateCredentialsDelegatesUsernameAndAPIKeyToZot(t *testing.T) {
 }
 
 func TestNewServerFromEnvDoesNotRequireStaticPushCredentials(t *testing.T) {
+	setRequiredServerEnv(t)
 	t.Setenv("TOKEN_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
 	t.Setenv("TOKEN_HMAC_SECRET", "")
 	t.Setenv("ZOT_PUSH_USERNAME", "")
@@ -81,6 +82,7 @@ func TestNewServerFromEnvDoesNotRequireStaticPushCredentials(t *testing.T) {
 }
 
 func TestNewServerFromEnvAuthTimeoutExceedsZotFailDelay(t *testing.T) {
+	setRequiredServerEnv(t)
 	t.Setenv("TOKEN_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
 	t.Setenv("ZOT_AUTH_TIMEOUT", "")
 
@@ -90,6 +92,46 @@ func TestNewServerFromEnvAuthTimeoutExceedsZotFailDelay(t *testing.T) {
 	}
 	if s.httpClient.Timeout != 10*time.Second {
 		t.Fatalf("default auth timeout = %s, want 10s", s.httpClient.Timeout)
+	}
+}
+
+func TestNewServerFromEnvRequiresRuntimeConfiguration(t *testing.T) {
+	required := []string{"REGISTRY_SERVICE", "REGISTRY_REALM", "ZOT_URL", "TOKEN_ENCRYPTION_KEY"}
+	for _, key := range required {
+		t.Run(key, func(t *testing.T) {
+			setRequiredServerEnv(t)
+			t.Setenv(key, "")
+
+			_, err := newServerFromEnv()
+			if err == nil || !strings.Contains(err.Error(), key+" is required") {
+				t.Fatalf("newServerFromEnv() error = %v, want missing %s", err, key)
+			}
+		})
+	}
+}
+
+func TestNewServerFromEnvValidatesRuntimeURLs(t *testing.T) {
+	tests := []struct {
+		key   string
+		value string
+		want  string
+	}{
+		{key: "REGISTRY_REALM", value: "registry.example.com/token", want: "absolute HTTP or HTTPS URL"},
+		{key: "REGISTRY_REALM", value: "https://user@example.com/token", want: "must not contain user information"},
+		{key: "ZOT_URL", value: "tcp://zot:5000", want: "absolute HTTP or HTTPS URL"},
+		{key: "ZOT_URL", value: "http://zot:5000/#fragment", want: "must not contain user information or a fragment"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key+"/"+tt.value, func(t *testing.T) {
+			setRequiredServerEnv(t)
+			t.Setenv(tt.key, tt.value)
+
+			_, err := newServerFromEnv()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("newServerFromEnv() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -141,13 +183,11 @@ func TestScopeParsingAndPolicy(t *testing.T) {
 func TestTokenSignVerifyAndAccess(t *testing.T) {
 	s := &server{
 		service:  "registry.example.com",
-		issuer:   "test",
 		ttl:      time.Minute,
 		tokenKey: []byte("01234567890123456789012345678901"),
 	}
 	now := time.Now().UTC()
 	token, err := s.sign(claims{
-		Issuer:    s.issuer,
 		Subject:   "anonymous",
 		Audience:  s.service,
 		IssuedAt:  now.Unix(),
@@ -200,7 +240,6 @@ func TestV2PingAuthorizationPolicy(t *testing.T) {
 	s := newTestServer(t)
 	now := time.Now().UTC()
 	validToken, err := s.sign(claims{
-		Issuer:    s.issuer,
 		Subject:   "anonymous",
 		Audience:  s.service,
 		IssuedAt:  now.Unix(),
@@ -219,7 +258,7 @@ func TestV2PingAuthorizationPolicy(t *testing.T) {
 		{name: "basic", value: basicAuthValue("user@example.com", "secret")},
 		{name: "unsupported", value: "Digest opaque"},
 		{name: "valid bearer", value: "Bearer " + validToken},
-		{name: "invalid bearer", value: "Bearer v1.invalid"},
+		{name: "invalid bearer", value: "Bearer " + tokenVersion + ".invalid"},
 	}
 	userAgents := []struct {
 		name  string
@@ -477,11 +516,11 @@ func TestIssuedTokenIsOpaqueAndDoesNotExposeAPIKey(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(body.Token, "v1.") {
-		t.Fatalf("token does not use the opaque v1 format: %q", body.Token)
+	if !strings.HasPrefix(body.Token, tokenVersion+".") {
+		t.Fatalf("token does not use the opaque %s format: %q", tokenVersion, body.Token)
 	}
 
-	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(body.Token, "v1."))
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(body.Token, tokenVersion+"."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +533,6 @@ func TestModifiedTokenIsRejected(t *testing.T) {
 	s := newTestServer(t)
 	now := time.Now().UTC()
 	token, err := s.sign(claims{
-		Issuer:    s.issuer,
 		Subject:   "anonymous",
 		Audience:  s.service,
 		IssuedAt:  now.Unix(),
@@ -806,12 +844,19 @@ func newTestServer(t *testing.T) *server {
 	return &server{
 		service:    "registry.example.com",
 		realm:      "https://registry.example.com/token",
-		issuer:     "test",
 		ttl:        time.Minute,
 		tokenKey:   []byte("01234567890123456789012345678901"),
 		zotURL:     zot.URL,
 		httpClient: zot.Client(),
 	}
+}
+
+func setRequiredServerEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("REGISTRY_SERVICE", "registry.example.com")
+	t.Setenv("REGISTRY_REALM", "https://registry.example.com/token")
+	t.Setenv("ZOT_URL", "http://zot:5000")
+	t.Setenv("TOKEN_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
 }
 
 func decodeTokenClaims(t *testing.T, s *server, token string) claims {
