@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	tokenVersion               = "v1"
+	tokenVersion               = "v2"
 	maxDependencyResponseBytes = 4096
 )
 
@@ -32,7 +32,6 @@ var (
 type server struct {
 	service       string
 	realm         string
-	issuer        string
 	ttl           time.Duration
 	tokenKey      []byte
 	zotURL        string
@@ -47,7 +46,6 @@ type accessEntry struct {
 }
 
 type claims struct {
-	Issuer                string        `json:"iss"`
 	Subject               string        `json:"sub"`
 	Audience              string        `json:"aud"`
 	IssuedAt              int64         `json:"iat"`
@@ -82,7 +80,20 @@ func main() {
 }
 
 func newServerFromEnv() (*server, error) {
-	service := envDefault("REGISTRY_SERVICE", "registry.example.com")
+	service, err := requiredEnv("REGISTRY_SERVICE")
+	if err != nil {
+		return nil, err
+	}
+	realm, err := requiredHTTPURL("REGISTRY_REALM")
+	if err != nil {
+		return nil, err
+	}
+	zotURL, err := requiredHTTPURL("ZOT_URL")
+	if err != nil {
+		return nil, err
+	}
+	zotURL = strings.TrimRight(zotURL, "/")
+
 	ttl, err := time.ParseDuration(envDefault("TOKEN_TTL", "15m"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid TOKEN_TTL: %w", err)
@@ -100,12 +111,6 @@ func newServerFromEnv() (*server, error) {
 		return nil, errors.New("TOKEN_ENCRYPTION_KEY must be a Base64-encoded 32-byte key")
 	}
 
-	zotURL := strings.TrimRight(envDefault("ZOT_URL", "http://zot:5000"), "/")
-	parsedZotURL, err := url.Parse(zotURL)
-	if err != nil || parsedZotURL.Host == "" || (parsedZotURL.Scheme != "http" && parsedZotURL.Scheme != "https") {
-		return nil, errors.New("ZOT_URL must be an absolute HTTP or HTTPS URL")
-	}
-
 	authTimeout, err := time.ParseDuration(envDefault("ZOT_AUTH_TIMEOUT", "10s"))
 	if err != nil || authTimeout <= 0 {
 		return nil, errors.New("ZOT_AUTH_TIMEOUT must be a positive duration")
@@ -117,8 +122,7 @@ func newServerFromEnv() (*server, error) {
 
 	return &server{
 		service:       service,
-		realm:         envDefault("REGISTRY_REALM", "https://"+service+"/token"),
-		issuer:        envDefault("REGISTRY_TOKEN_ISSUER", "zot-token-service"),
+		realm:         realm,
 		ttl:           ttl,
 		tokenKey:      tokenKey,
 		zotURL:        zotURL,
@@ -253,7 +257,6 @@ func (s *server) handleToken(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	token, err := s.sign(claims{
-		Issuer:                s.issuer,
 		Subject:               subject,
 		Audience:              s.service,
 		IssuedAt:              now.Unix(),
@@ -447,7 +450,7 @@ func (s *server) verify(token string) (claims, error) {
 		return claims{}, err
 	}
 	now := time.Now().Unix()
-	if c.Issuer != s.issuer || c.Audience != s.service || now < c.NotBefore || now > c.ExpiresAt {
+	if c.Audience != s.service || now < c.NotBefore || now > c.ExpiresAt {
 		return claims{}, errors.New("invalid token claims")
 	}
 	return c, nil
@@ -597,4 +600,27 @@ func envDefault(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func requiredEnv(key string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return value, nil
+}
+
+func requiredHTTPURL(key string) (string, error) {
+	value, err := requiredEnv(key)
+	if err != nil {
+		return "", err
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", fmt.Errorf("%s must be an absolute HTTP or HTTPS URL", key)
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return "", fmt.Errorf("%s must not contain user information or a fragment", key)
+	}
+	return value, nil
 }

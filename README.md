@@ -6,7 +6,8 @@ It implements the Docker Registry v2 token flow and an `/authz` endpoint for a p
 
 ## Run
 
-The service requires a Base64-encoded 32-byte AES key. Generate one for each deployment:
+The service requires an explicit registry identity, token endpoint, Zot API URL,
+and a Base64-encoded 32-byte AES key. Generate a unique key for each deployment:
 
 ```sh
 export TOKEN_ENCRYPTION_KEY="$(openssl rand -base64 32)"
@@ -15,6 +16,12 @@ export REGISTRY_REALM=https://registry.example.com/token
 export ZOT_URL=http://zot:5000
 go run ./src
 ```
+
+`REGISTRY_SERVICE`, `REGISTRY_REALM`, `ZOT_URL`, and
+`TOKEN_ENCRYPTION_KEY` are required. The process exits during startup when any
+required setting is absent or when either URL is not an absolute HTTP or HTTPS
+URL. Optional duration and listener settings retain conservative defaults; see
+[`.env.example`](.env.example).
 
 It listens on `:8080` by default. Available endpoints:
 
@@ -49,6 +56,7 @@ separating the application package from repository metadata.
 ## Security notes
 
 - Keep `TOKEN_ENCRYPTION_KEY` secret and stable for the lifetime of issued tokens. Rotating it invalidates existing tokens.
+- Use a different `TOKEN_ENCRYPTION_KEY` for each registry deployment. Opaque tokens are audience-bound with `REGISTRY_SERVICE` and authenticated by AES-GCM; they do not expose or require a configurable JWT issuer.
 - Terminate TLS at the reverse proxy. Do not expose this service directly to the public internet.
 - Configure the proxy to prevent clients from injecting the internal `X-Original-*`, `X-ZOT-*`, or upstream-authorization headers.
 - Use a short `TOKEN_TTL`; the default is 15 minutes.
